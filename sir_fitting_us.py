@@ -10,8 +10,12 @@ from scipy.linalg import expm
 from tqdm import tqdm
 from matplotlib import pyplot as plt
 from tqdm import tqdm
+
 from eda import us_data
+from mass_pop_data import county_pops
 # T = len(us_data['confirmed'])
+
+np.set_printoptions(precision=3)
 
 log = np.log
 exp = np.exp
@@ -145,7 +149,11 @@ def mh(lf, q, x, iterations=10000, modulus=100):
             accepts += 1
         if iteration % modulus == 0:
             traj.append((x, ll))
-            print(iteration, x, ll, accepts, accepts / (iteration + 1))
+            print(
+                "{}/{} log_params: {} log-likelihood: {:1.3f} acceptances: {} acceptance ratio: {:1.3f}".format(
+                    iteration, iterations, x, ll, accepts, accepts / (iteration + 1)
+                )
+            )
     return traj
 
 def fit_init_approximation(tol=10**-14):
@@ -471,15 +479,15 @@ def plot_seir_param_results(traj, data, fname=None):
     T = len(data['confirmed'])
     obs_c = data['confirmed'] / N
     obs_d = data['deaths'] / N
-    obs_rc = data['recovered'] / N
+    #obs_rc = data['recovered'] / N
     ts = np.arange(T)
 
     approx_f = seir_approximation(init_condition, params)
     approx_c = [approx_f(t)[SEIR_VAR_NAMES.index('i')] for t in ts]
-    approx_r = [approx_f(t)[SEIR_VAR_NAMES.index('r')] for t in ts]
+    #approx_r = [approx_f(t)[SEIR_VAR_NAMES.index('r')] for t in ts]
     approx_d = [approx_f(t)[SEIR_VAR_NAMES.index('d')] for t in ts]
 
-    plt.subplot(3, 1, 1)
+    plt.subplot(2, 1, 1)
     plt.plot(obs_c, linestyle=' ', marker='o', label='C (observed)')
     plt.plot(seir_c,  color='blue', label='C (SEIR model)')
     plt.plot(approx_c,  color='orange', label='C (approx)', linestyle='--')
@@ -492,14 +500,14 @@ def plot_seir_param_results(traj, data, fname=None):
     #     plt.plot(seir_c,  color='blue', alpha=0.01)
     plt.legend()
 
-    plt.subplot(3, 1, 2)
-    plt.plot(obs_rc, linestyle=' ', marker='o', label='Rc (observed)')
-    plt.plot(seir_r,  color='blue', label='Rc (SEIR model)')
-    plt.plot(approx_r,  color='orange', label='Rc (approx)', linestyle='--')
-    plt.ylabel("Population Fraction", size='x-large')
-    plt.legend()
+    # plt.subplot(3, 1, 2)
+    # plt.plot(obs_rc, linestyle=' ', marker='o', label='Rc (observed)')
+    # plt.plot(seir_r,  color='blue', label='Rc (SEIR model)')
+    # plt.plot(approx_r,  color='orange', label='Rc (approx)', linestyle='--')
+    # plt.ylabel("Population Fraction", size='x-large')
+    # plt.legend()
 
-    plt.subplot(3, 1, 3)
+    plt.subplot(2, 1, 2)
     plt.plot(obs_d, linestyle=' ', marker='o', label='D (observed)')
     plt.plot(seir_d,  color='blue', label='D (SEIR model)')
     plt.plot(approx_d,  color='orange', label='D (approx)', linestyle='--')
@@ -592,7 +600,7 @@ def make_csv_from_traj(traj, data, fname):
     start = 'Jan 22, 2020'
     end = pd.to_datetime(start) + pd.Timedelta(days=(365 - 1))
     date_range = pd.date_range(start=start, end=end)
-    df = pd.DataFrame({
+    data_dict = {
         'Date': date_range,
         'Cases_Mean': round_to_int(cases_mean),
         'Cases_LB': (round_to_int(cases_2p5)),
@@ -600,7 +608,16 @@ def make_csv_from_traj(traj, data, fname):
         'Deaths_Mean': (round_to_int(deaths_mean)),
         'Deaths_LB': (round_to_int(deaths_2p5)),
         'Deaths_UB': (round_to_int(deaths_97p5)),
-        })
+        }
+    data_cols = ['Cases_Mean', 'Cases_LB', 'Cases_UB', 'Deaths_Mean', 'Deaths_LB', 'Deaths_UB']
+    for county, county_pop in sorted(county_pops.items()):
+        county_frac = county_pop / N
+        for col_name in data_cols:
+            col = data_dict[col_name]
+            county_col = round_to_int(col * county_frac)
+            county_col_name = county + "_" + col_name
+            data_dict[county_col_name] = county_col
+    df = pd.DataFrame(data_dict)
     df.set_index('Date')
     df.to_csv(fname, index=False)
 

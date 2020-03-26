@@ -3,6 +3,7 @@ import csv
 import os
 
 import numpy as np
+from mass_pop_data import county_pops
 
 def none_fill(xs):
     return [x if x > 0 else None for x in xs]
@@ -52,11 +53,34 @@ us_data = {
     'pop': 3.27 * 10**8
 }
 
+# as of 3/25:
+# https://www.mass.gov/doc/covid-19-cases-in-massachusetts-as-of-march-25-2020/download
+ma_confirmed = np.array(
+    [   0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
+        0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
+        0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
+        0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
+        0,    0,    0,    0,   92,   95,  108,  123,  138,  164,  197,
+        218,  218,  328,  413,  525,  646,  777, 1159, 1838
+    ]
+)
+
+# 3/20 413, 1
+# 3/21 525, 1
+# 3/22 646, 5
+# 3/23 777, 9
+ma_deaths = np.array([
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 5, 9, 11, 15]
+)
+
+assert(len(ma_confirmed) == len(ma_deaths))
 ma_data = {
-    'confirmed': np.array(confirmed[('Massachusetts', 'US')]),
-    'deaths': np.array(deaths[('Massachusetts', 'US')]),
-    'recovered': np.array(recovered[('Massachusetts', 'US')]),
-    'pop': 6.9 * 10**6
+    'confirmed': ma_confirmed,
+    'deaths': ma_deaths,
+    #'recovered': np.array(recovered[('Massachusetts', 'US')]),
+    'pop': sum(county_pops.values())
 
 }
 def plot_us():
