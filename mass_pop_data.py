@@ -1,4 +1,4 @@
-county_pops = {
+ma_county_pops = {
 "Middlesex": 	1_595_192,
 "Worcester": 	822_280,
 "Suffolk": 	791_766,

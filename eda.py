@@ -3,33 +3,67 @@ import csv
 import os
 
 import numpy as np
-from mass_pop_data import county_pops
+import pandas as pd
+
+from mass_pop_data import ma_county_pops
+from us_states import US_STATES
+
+HIGH_PRIORITY_STATES = [
+    "Massachusetts",
+    "Texas",
+    "California",
+    "Washington",
+    "New York",
+    "Hawaii",
+    "Alaska",
+    "Guam"
+]
+
+
 
 def none_fill(xs):
     return [x if x > 0 else None for x in xs]
 
-def read_csv(data_kind):
-    template = "../COVID-19/csse_covid_19_data/csse_covid_19_time_series/time_series_19-covid-{}.csv"
-    fname = template.format(data_kind)
-    with open(fname) as f:
-        lines = [line for line in csv.reader(f)]
+if not "confirmed_df" in globals():
+    print("DLing confirmed")
+    confirmed_df = pd.read_csv(
+        "https://www.soothsawyer.com/wp-content/uploads/2020/03/time_series_19-covid-Confirmed.csv"
+    )
+if not "deaths_df" in globals():
+    print("DLing deaths")
+    deaths_df = pd.read_csv(
+        "https://www.soothsawyer.com/wp-content/uploads/2020/03/time_series_19-covid-Deaths.csv"
+    )
+
+confirmed_date = confirmed_df.columns[-1]
+deaths_date = deaths_df.columns[-1]
+assert(confirmed_date == deaths_date)
+
+print("Confirmed df date:", confirmed_date)
+print("Deaths df date:", deaths_df.columns[-1])
+def interpret_df(df):
+    # template = "../COVID-19/csse_covid_19_data/csse_covid_19_time_series/time_series_19-covid-{}.csv"
+    # fname = template.format(data_kind)
+    # with open(fname) as f:
+    #     lines = [line for line in csv.reader(f)]
     results = {}
-    for line in lines[1:]:  # skip header
+    for i, line in df.iterrows():
+        if i == 0:
+            continue
         try:
             province = line[0]
             country = line[1]
             lat = line[2]
             lon = line[3]
-            time_series = [int(x) for x in line[4:] if x]
+            time_series = [int(x) if pd.notnull(x) else x for x in line[4:]]
             results[province, country] = time_series
-        except:
-            print("FAILED on:", data_kind, line[:1])
+        except Exception as e:
+            print("FAILED on:", e, line)
 
     return results
 
-confirmed = read_csv("Confirmed")
-recovered = read_csv("Recovered")
-deaths = read_csv("Deaths")
+# confirmed = interpret_df(confirmed_df)
+# deaths = interpret_df(deaths_df)
 
 def aggregate_provinces(d):
     N = min(len(time_series) for time_series in (d.values()))
@@ -46,41 +80,34 @@ def show_data(d):
     plt.semilogy()
     plt.show()
 
+us_confirmed_df = confirmed_df[
+    confirmed_df['Province/State'].isin(US_STATES) &
+    (confirmed_df['Country/Region'] == 'US')
+]
+us_deaths_df = deaths_df[
+    deaths_df['Province/State'].isin(US_STATES) &
+    (deaths_df['Country/Region'] == 'US')
+]
+
+date_cols = us_confirmed_df.columns[4:]  # time-series data containing cols
 us_data = {
-    'confirmed': aggregate_provinces(confirmed)['US'],
-    'deaths': aggregate_provinces(deaths)['US'],
-    'recovered': aggregate_provinces(recovered)['US'],
+    'confirmed': np.sum(us_confirmed_df[date_cols]).values,
+    'deaths': np.sum(us_deaths_df[date_cols]).values,
+    #'recovered': aggregate_provinces(recovered)['US'],
     'pop': 3.27 * 10**8
 }
 
-# as of 3/25:
-# https://www.mass.gov/doc/covid-19-cases-in-massachusetts-as-of-march-25-2020/download
-ma_confirmed = np.array(
-    [   0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
-        0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
-        0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
-        0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
-        0,    0,    0,    0,   92,   95,  108,  123,  138,  164,  197,
-        218,  218,  328,  413,  525,  646,  777, 1159, 1838
-    ]
-)
-
-# 3/20 413, 1
-# 3/21 525, 1
-# 3/22 646, 5
-# 3/23 777, 9
-ma_deaths = np.array([
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 5, 9, 11, 15]
-)
-
-assert(len(ma_confirmed) == len(ma_deaths))
+italy_data = {
+    'confirmed':confirmed_df[confirmed_df['Country/Region'] == 'Italy'][date_cols].values[0],
+    'deaths':deaths_df[deaths_df['Country/Region'] == 'Italy'][date_cols].values[0],
+    'pop': 60.48 * 10**6
+}
+is_MA = confirmed_df['Province/State'] == 'Massachusetts'
 ma_data = {
-    'confirmed': ma_confirmed,
-    'deaths': ma_deaths,
+    'confirmed': confirmed_df[is_MA][date_cols].values[0],
+    'deaths': deaths_df[is_MA][date_cols].values[0],
     #'recovered': np.array(recovered[('Massachusetts', 'US')]),
-    'pop': sum(county_pops.values())
+    'pop': sum(ma_county_pops.values())
 
 }
 def plot_us():

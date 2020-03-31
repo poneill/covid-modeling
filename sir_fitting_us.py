@@ -12,7 +12,8 @@ from matplotlib import pyplot as plt
 from tqdm import tqdm
 
 from eda import us_data
-from mass_pop_data import county_pops
+from mass_pop_data import ma_county_pops
+from nyt_data import county_data
 # T = len(us_data['confirmed'])
 
 np.set_printoptions(precision=3)
@@ -230,21 +231,21 @@ def log_likelihood(sol, data):
     N = data['pop']
     T = len(data['confirmed'])
     y_c = sol.y[VAR_NAMES.index('c'), :]
-    y_rc = sol.y[VAR_NAMES.index('rc'), :]
+    #y_rc = sol.y[VAR_NAMES.index('rc'), :]
     y_d = sol.y[VAR_NAMES.index('d'), :]
-    y_trash = 1 - (y_c + y_rc + y_d)
+    y_trash = 1 - (y_c + y_d)
     log_prob = 0
     for t in range(T):
         #print(t)
-        C, RC, D = obs_c[t], obs_rc[t], obs_d[t]
-        TRASH = N - (C + RC + D)
-        c, rc, d, trash = y_c[t], y_rc[t], y_d[t], y_trash[t]
-        prefactor = log_fac(N) - (log_fac(C) + log_fac(RC) + log_fac(D) + log_fac(TRASH))
+        C, D = obs_c[t], obs_d[t]
+        TRASH = N - (C + D)
+        c, d, trash = y_c[t], y_d[t], y_trash[t]
+        prefactor = log_fac(N) - (log_fac(C) + log_fac(D) + log_fac(TRASH))
         #print(c, rc, d)
-        log_prob_t = prefactor + C * log(c) + RC * log(rc) + D * log(d) + TRASH * log(trash)
+        log_prob_t = prefactor + C * log(c) + D * log(d) + TRASH * log(trash)
         #print(prefactor, log_prob_t)
         log_prob += log_prob_t
-    return log_prob_t
+    return log_prob
 
 def log_likelihood2(sol, data):
     obs_c = data['confirmed']
@@ -266,30 +267,45 @@ def log_likelihood2(sol, data):
         log_prob_t = -((C - c*N)**2 + (RC - rc*N)**2 + (D - (d*N))**2 + (TRASH - trash*N)**2)
         #print(prefactor, log_prob_t)
         log_prob += log_prob_t
-    return log_prob_t
+    return log_prob
 
-def seir_log_likelihood(sol, data):
+def seir_log_likelihood(sol, data, only_deaths=True):
     obs_c = data['confirmed']
     obs_d = data['deaths']
     N = data['pop']
     T = len(data['confirmed'])
     y_c = bound(sol.y[SEIR_VAR_NAMES.index('i'), :], N)
     y_d = bound(sol.y[SEIR_VAR_NAMES.index('d'), :], N)
-    y_trash = 1 - (y_c + y_d)
+    if only_deaths:
+        y_trash = 1 - (y_d)
+    else:
+        y_trash = 1 - (y_c + y_d)
     log_prob = 0
     for t in range(T):
         #print(t)
-        if obs_c[t] < 100:
-            continue
-        C, D = obs_c[t], obs_d[t]
-        TRASH = N - (C + D)
-        c, d, trash = y_c[t],  y_d[t], y_trash[t]
-        prefactor = log_fac(N) - (log_fac(C) + log_fac(D) + log_fac(TRASH))
-        #print(c, rc, d)
-        log_prob_t = prefactor + C * log(c) + D * log(d) + TRASH * log(trash)
-        #print(prefactor, log_prob_t)
-        log_prob += log_prob_t
-    return log_prob_t
+        # if obs_c[t] < 100:
+        #     continue
+        if only_deaths:
+            D = obs_d[t]
+            TRASH = N - D
+            d, trash = y_d[t], y_trash[t]
+            log_prob += multinomial_ll([d, trash], [D, TRASH])
+        else:
+            C, D = obs_c[t], obs_d[t]
+            TRASH = N - (C + D)
+            c, d, trash = y_c[t],  y_d[t], y_trash[t]
+            log_prob += multinomial_ll([c, d, trash], [C, D, TRASH])
+        # log_prob += sse_ll([c, d, trash], [C, D, TRASH])
+    return log_prob
+
+def multinomial_ll(ps, obs):
+    N = np.sum(obs)
+    prefactor = log_fac(N) - sum(log_fac(n) for n in obs)
+    return prefactor + sum(o * log(p) for (p, o) in zip(ps, obs))
+
+def sse_ll(ps, obs):
+    N = sum(obs)
+    return -sum((p * N - o)**2 for (p, o) in zip(ps, obs))
 
 
 def random_hyp():
@@ -312,24 +328,25 @@ def mutate_hyp(hyp):
     new_thetas = exp(new_log_thetas)
     return new_ic, new_thetas
 
-def ll_from_hyp(hyp):
+def ll_from_hyp(hyp, data):
     ic, thetas = hyp
-    sol = solve_sir(ic, thetas)
-    return log_likelihood2(sol, us_data)
+    T = len(data['confirmed'])
+    sol = solve_sir(ic, thetas, T)
+    return log_likelihood(sol, data)
 
-def fit_model(generations=10000):
+def fit_model(data, generations=10000):
     ll = None
     traj = []
     acceptances = 0
     while ll is None:
         hyp = random_hyp()
         print(hyp)
-        prop_ll = ll_from_hyp(hyp)
+        prop_ll = ll_from_hyp(hyp, data)
         if not np.isnan(prop_ll):
             ll = prop_ll
     for t in range(generations):
         hyp_p = mutate_hyp(hyp)
-        ll_p = ll_from_hyp(hyp_p)
+        ll_p = ll_from_hyp(hyp_p, data)
         if np.log(random.random()) < ll_p - ll:
             acceptances += 1
             hyp = hyp_p
@@ -349,8 +366,11 @@ def ps_from_lls(lls):
 
 def check_hyp(hyp, data):
     N = data['pop']
-    sol = solve_sir(*hyp)
-    plot_sol(sol)
+    T = len(data['confirmed'])
+    x0, params = hyp
+    sol = solve_sir(x0, params, T)
+    for name, ts in zip(VAR_NAMES, sol.y):
+        plt.plot(ts, label=name)
     plt.plot(data['confirmed'] / N, label='obs confirmed', marker='o', linestyle=' ')
     plt.plot(data['recovered'] / N, label='obs recovered', marker='o', linestyle=' ')
     plt.plot(data['deaths'] / N, label='obs deaths', marker='o', linestyle=' ')
@@ -372,6 +392,7 @@ def plot_lls(traj):
     plt.savefig("ll-plot.png", dpi=300)
 
 def plot_param_results(traj, data):
+    """Use with SIR"""
     N = data['pop']
     T = len(data['confirmed'])
     log_params, ll = traj[-1]
@@ -437,7 +458,7 @@ def log_param_scatterplot(log_param_traj, param_names=["beta", "sigma", "gamma",
     # plt.tight_layout()
     # plt.savefig("param-pairplots.png", dpi=300)
     # plt.close()l
-def seir_experiment(data, log_params=None, iterations=10_000, sigma=0.01):
+def seir_experiment(data, log_params=None, iterations=10_000, sigma=0.01, only_deaths=True):
     # S, E, I, R, D
 
     T = len(data['confirmed'])
@@ -453,7 +474,7 @@ def seir_experiment(data, log_params=None, iterations=10_000, sigma=0.01):
         params, I0 = params[:-1], params[-1]
         init_condition = np.array([1 -I0, 0, I0, 0, 0])
         sol = solve_seir(init_condition, params, T)
-        return seir_log_likelihood(sol, data)
+        return seir_log_likelihood(sol, data, only_deaths=only_deaths)
     traj = mh(lf, lambda x:q(x, sigma=sigma), log_params, modulus=10, iterations=iterations)
     return traj
     # log_params1 = traj1[-1][0]
@@ -477,20 +498,20 @@ def plot_seir_param_results(traj, data, fname=None):
 
     N = data['pop']
     T = len(data['confirmed'])
-    obs_c = data['confirmed'] / N
-    obs_d = data['deaths'] / N
+    obs_c = data['confirmed']
+    obs_d = data['deaths']
     #obs_rc = data['recovered'] / N
     ts = np.arange(T)
 
     approx_f = seir_approximation(init_condition, params)
-    approx_c = [approx_f(t)[SEIR_VAR_NAMES.index('i')] for t in ts]
+    approx_c = np.array([approx_f(t)[SEIR_VAR_NAMES.index('i')] for t in ts])
     #approx_r = [approx_f(t)[SEIR_VAR_NAMES.index('r')] for t in ts]
-    approx_d = [approx_f(t)[SEIR_VAR_NAMES.index('d')] for t in ts]
+    approx_d = np.array([approx_f(t)[SEIR_VAR_NAMES.index('d')] for t in ts])
 
     plt.subplot(2, 1, 1)
     plt.plot(obs_c, linestyle=' ', marker='o', label='C (observed)')
-    plt.plot(seir_c,  color='blue', label='C (SEIR model)')
-    plt.plot(approx_c,  color='orange', label='C (approx)', linestyle='--')
+    plt.plot(seir_c * N,  color='blue', label='C (SEIR model)')
+    plt.plot(approx_c * N,  color='orange', label='C (approx)', linestyle='--')
     # for log_params, ll in traj[::10]:
     #     params = exp(log_params)
     #     params, I0 = params[:-1], params[-1]
@@ -509,8 +530,8 @@ def plot_seir_param_results(traj, data, fname=None):
 
     plt.subplot(2, 1, 2)
     plt.plot(obs_d, linestyle=' ', marker='o', label='D (observed)')
-    plt.plot(seir_d,  color='blue', label='D (SEIR model)')
-    plt.plot(approx_d,  color='orange', label='D (approx)', linestyle='--')
+    plt.plot(seir_d * N,  color='blue', label='D (SEIR model)')
+    plt.plot(approx_d * N,  color='orange', label='D (approx)', linestyle='--')
     plt.legend()
     plt.xlabel("Days since 1/22/20", size='x-large')
 
@@ -534,6 +555,7 @@ def plot_seir_sol(sol):
     plt.show()
 
 def plot_seir_sols_from_traj(traj, data):
+    N = data['pop']
     colors = 'brygc'
     for i, (log_params, ll) in tqdm(enumerate(traj)):
         params = exp(log_params)
@@ -542,14 +564,13 @@ def plot_seir_sols_from_traj(traj, data):
         sol = solve_seir(init_condition, params, 365*2)
         for var_name, time_series, color in zip(SEIR_VAR_NAMES, sol.y, colors):
             plt.plot(
-                time_series,
+                time_series * N,
                 label=(var_name if i == 0 else None),
                 color=color,
                 alpha=0.5
             )
-    N = data['pop']
-    plt.plot(data['confirmed']/N, marker='o', linestyle=' ', label='obs C')
-    plt.plot(data['deaths']/N, marker='o', linestyle=' ', label='obs D')
+    plt.plot(data['confirmed'], marker='o', linestyle=' ', label='obs C')
+    plt.plot(data['deaths'], marker='o', linestyle=' ', label='obs D')
     start = 'Jan 22, 2020'
     today = pd.to_datetime('now')
     date_range = pd.date_range(start=start, end=today)
@@ -571,7 +592,7 @@ def seir_approximation(y0, params):
     ])
     return lambda t: expm(A*t).dot(y0)
 
-def make_csv_from_traj(traj, data, fname):
+def make_csv_from_ma_traj(traj, data, fname):
     N = data['pop']
     T = 365
     cases = [[] for _ in range(T)]
@@ -610,7 +631,7 @@ def make_csv_from_traj(traj, data, fname):
         'Deaths_UB': (round_to_int(deaths_97p5)),
         }
     data_cols = ['Cases_Mean', 'Cases_LB', 'Cases_UB', 'Deaths_Mean', 'Deaths_LB', 'Deaths_UB']
-    for county, county_pop in sorted(county_pops.items()):
+    for county, county_pop in sorted(ma_county_pops.items()):
         county_frac = county_pop / N
         for col_name in data_cols:
             col = data_dict[col_name]
@@ -681,3 +702,23 @@ def inspect_traj(traj):
     plt.show()
     log_param_scatterplot([x for (x, ll) in traj])
     plt.show()
+    thetas = [theta for (theta, ll) in traj]
+    params = zip(*thetas)
+    for param_name, param in zip(SEIR_PARAM_NAMES, params):
+        coef_of_var = np.std(param)/abs(np.mean(param))
+        print(param_name, coef_of_var)
+
+def fit_state(state_name):
+    counties_data = {count}
+
+def sigmoid(x, a, b):
+    return 1 / (1 + exp(a*x + b))
+def sigmoid_fit(ys, iterations=10000):
+    def f(a_b):
+        a, b = a_b
+        return -log(sum((y - sigmoid(t, a, b))**2 for (t, y) in enumerate(ys)))
+    def q(a_b):
+        return a_b + np.random.normal(size=2)
+    x0 = np.array([100, 100])
+    traj = mh(f, q, x0, iterations=iterations)
+    return traj
